@@ -317,7 +317,7 @@ def jelllyfin_download(id=None,file_path=None,file_name=None,url=None,headers=No
 
 
 while True:
-    jellyfin_url = input("Enter jellyfin url(https://jellyfin.<domain>): ") or None
+    jellyfin_url = input("Enter jellyfin url(https://<hostname/ip>): ") or None
     if jellyfin_url:
         break
     else:
