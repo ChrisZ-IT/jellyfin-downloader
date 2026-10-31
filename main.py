@@ -1,15 +1,17 @@
+import argparse
 import requests
 import os
 from getpass import getpass
 from pathlib import Path
 
-def authenticate(url):
-    while True:
-        username = input("Enter Username: ") or None
-        if username:
-            break
-        else:
-            print("Username cant be empty")
+def authenticate(url,username):
+    if username == None:
+        while True:
+            username = input("Enter Username: ") or None
+            if username:
+                break
+            else:
+                print("Username cant be empty")
     while True:
         password = getpass() or None
         if password:
@@ -65,9 +67,10 @@ def authenticate(url):
         print(f"\nScript Stopped")
         exit()
 
-def jellyfin_search(url,headers):
+def jellyfin_search(url,headers,type=None,title=None):
     url = f"{url}/Items"
-    type = (input("Is this a tv show or movie? (tv)/movie: ") or "tv").lower()
+    if type == None:
+        type = (input("Is this a tv show or movie? (tv)/movie: ") or "tv").lower()
     if type == 'movie':
         includeItemTypes = "Movie"
     if type == 'tv' or type == 'tv show':
@@ -78,7 +81,8 @@ def jellyfin_search(url,headers):
     #     includeItemTypes = "Audio"
 
     while True:
-        title = input(f"{type} title: ")
+        if title == None:
+            title = input(f"{type} title: ")
         search_params = {
             "SearchTerm": title,
             "IncludeItemTypes": includeItemTypes,
@@ -189,11 +193,10 @@ def movie_selection(title,id,year,url,headers):
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
 
-def tv_season_selection(title,id,url,headers):
+def tv_season_selection(title,id,url,headers,all=None):
     return_results = []
     season_results = []
     seasons_url = f"{url}/Shows/{id}/Seasons"
-
     try:
         response = requests.get(seasons_url,headers=headers)
         if response.status_code == 200:
@@ -211,33 +214,48 @@ def tv_season_selection(title,id,url,headers):
                         season_results.append(season_object)
                         print(f"{count}) {title} - Season {name}")
                         count = count + 1
-                print(f"{count}) All")
-                while True:
-                    index = input(f"Enter number for selection: ")
-                    if int(index) == count:
-                        index = "all"
-                        break
-                    elif (int(index) - 1) < count:
-                        index = (int(index) - 1)
-                        break
-                    else:
-                        print("Invalid selection. Try again")
+                if all == None:
+                    print(f"{count}) All")
+                    while True:
+                        index = input(f"Enter number for selection: ")
+                        if int(index) == count:
+                            index = "all"
+                            break
+                        elif (int(index) - 1) < count:
+                            index = (int(index) - 1)
+                            break
+                        else:
+                            print("Invalid selection. Try again")
+                else:
+                    index = "all"
             else:
-                index = 0
+                print(f"🔍 Found {len(items)} seasons for '{title}':\n")
+                for item in items:
+                    if item != None:
+                        name = int(item.get("Name").split(' ')[-1])
+                        season_id = item.get("Id")
+                        season_object = dict(series=title,name=name,season_id=season_id,parent_id=id)
+                        season_results.append(season_object)
+                if all == None:
+                    index = 0
+                else:
+                    index = "all"
             if index == "all":
                 for season in season_results:
-                    series_name = season.get("series")
-                    season_name = season.get("name")
-                    parent_id = season.get("parent_id")
-                    season_id = season.get("season_id")
+                    result_dict = season
+                    series_name = result_dict.get("series", result_dict.get("SeriesName"))
+                    season_name = result_dict.get("name", result_dict.get("Name"))
+                    parent_id = result_dict.get("parent_id", result_dict.get("SeriesId"))
+                    season_id = result_dict.get("season_id", result_dict.get("Id"))
                     episode_results = tv_episode_selection(series_name,title,season_name,parent_id,season_id,index,url,headers)
                     return_results.append(episode_results)
                 return return_results
             else:
-                series_name = season_results[index].get("series")
-                season_name = season_results[index].get("name")
-                parent_id = season_results[index].get("parent_id")
-                season_id = season_results[index].get("season_id")
+                result_dict = season_results[0]
+                series_name = result_dict.get("series", result_dict.get("SeriesName"))
+                season_name = result_dict.get("name", result_dict.get("Name"))
+                parent_id = result_dict.get("parent_id", result_dict.get("SeriesId"))
+                season_id = result_dict.get("season_id", result_dict.get("Id"))
                 episode_results = tv_episode_selection(series_name,title,season_name,parent_id,season_id,index,url,headers)
                 return_results.append(episode_results)
                 return return_results
@@ -259,8 +277,9 @@ def tv_episode_selection(series,title,season,parent_id,season_id,selection,url,h
             search_results = response.json()
             items = search_results.get("Items", [])
             if len(items) > 1:
-                print(f"🔍 Found {len(items)} episodes for '{title} - Season {season}':\n")
-                print(f"Select episode to download:\n")
+                print(f"\n🔍 Found {len(items)} episodes for '{title} - Season {season}':")
+                if selection != 'all':
+                    print(f"Select episode to download:\n")
                 count = 1
                 for item in items:
                     if item != None:
@@ -286,6 +305,14 @@ def tv_episode_selection(series,title,season,parent_id,season_id,selection,url,h
                         else:
                             print("Invalid selection. Try again")
             else:
+                print(f"🔍 Found {len(items)} episodes for '{title} - Season {season}':\n")
+                for item in items:
+                    if item != None:
+                        name = item.get("Name")
+                        id = item.get("Id")
+                        file_type = get_media_info(id,url,headers)
+                        episode_object = dict(series=series,season=season,episode=count,name=f"{name}",file_type=file_type,id=f"{id}")
+                        episode_results.append(episode_object)
                 index = 0
             if index == "all":
                 return episode_results
@@ -316,17 +343,43 @@ def jelllyfin_download(id=None,file_path=None,file_name=None,url=None,headers=No
         print(f"An error occurred: {e}")
 
 
-while True:
-    jellyfin_url = input("Enter jellyfin url(https://<hostname/ip>): ") or None
-    if jellyfin_url:
-        break
-    else:
-        print("Jellyfin url can't be empty")
+parser = argparse.ArgumentParser(description="Download media from a jellyfin server")
+parser.add_argument('-url', '--url', required=False, default=None, help="Enter Jellyfin hostname")
+parser.add_argument('-path', '--path', required=False, default=None, help="Where do you want to save downloads to?")
+parser.add_argument('-u', '--username', required=False, default=None, help="Enter Jellyfin username")
+parser.add_argument('-t', '--type', required=False, default=None, help="Enter media type: tv, movie, music")
+parser.add_argument('-n', '--title', required=False, default=None, type=str, help="Enter title of the media you want to download")
+parser.add_argument('-a', '--all', required=False, default=None, action='store_true', help="Download all episodes")
+parser.add_argument('-o', '--overwrite', required=False, action=argparse.BooleanOptionalAction, help="Overwrite any existing downloads, Default prompts you")
+parser.add_argument('-no', '--no_overwrite', required=False, action=argparse.BooleanOptionalAction, help="Do not overwrite any existing downloads, Default prompts you")
+args = parser.parse_args()
 
-root_destination = input(f"Enter download destination({Path.home()}/Downloads): ") or f"{Path.home()}/Downloads"
+if args.overwrite and args.no_overwrite:
+    overwrite_media = None
+elif args.overwrite:
+    overwrite_media = True
+elif args.no_overwrite:
+    overwrite_media = False
+else:
+    overwrite_media = None
 
-auth = authenticate(jellyfin_url)
-type, search = jellyfin_search(jellyfin_url,auth)
+if args.url == None:
+    while True:
+        jellyfin_url = input("Enter jellyfin url(https://<hostname/ip>): ") or None
+        if jellyfin_url:
+            break
+        else:
+            print("Jellyfin url can't be empty")
+else:
+    jellyfin_url = args.url
+
+if args.path == None:
+    root_destination = input(f"Enter download destination({Path.home()}/Downloads): ") or f"{Path.home()}/Downloads"
+else:
+    root_destination = args.path
+
+auth = authenticate(jellyfin_url,args.username)
+type, search = jellyfin_search(jellyfin_url,auth,args.type,args.title)
 title, id, year= jellyfin_search_parse(type,search)
 
 if type == "movie":
@@ -339,29 +392,41 @@ if type == "movie":
         file_type = item.get("file_type")
         series = None
         season = None
-        file_path = f"{root_destination}/{movie_title} ({movie_year})"
-        if movie_title.lower() in movie_name.lower():
-            file_name = f"{movie_title} ({movie_year}).{file_type}"
-        else:
-            file_name = f"{movie_title} ({movie_year}) - {movie_name}.{file_type}"
+        file_path = (f"{root_destination}/{movie_title} ({movie_year})").replace(':','')
+        file_name = (f"{movie_title} ({movie_year}).{file_type}").replace(':','')
         full_path = f"{file_path}/{file_name}"
         if os.path.exists(full_path):
             print(f"{file_path}/{file_name} - Already exists!")
-            overwrite = (input("Overwrite file? y/(n): ") or "n").lower()
-            if overwrite == "y" or overwrite == "yes":
-                print()
-            elif overwrite == "n" or overwrite == "no":
+            if overwrite_media == True:
+                overwrite = "y"
+            elif overwrite_media == False:
+                overwrite = "n"
+            else:
+                while True:
+                    overwrite = (input("Overwrite file? y/(n): ") or "n").lower()
+                    if overwrite == 'y' or overwrite == 'n':
+                        break
+                    else:
+                        print("Please type 'y' or 'n'")
+            if overwrite == "y":
+                print("Overwriting")
+                print(f"Download Starting: {file_path}/{file_name}. Please wait...")
+                download_status = jelllyfin_download(id,file_path,file_name,jellyfin_url,auth)
+                print(download_status)
+            elif overwrite == "n":
                 print(f"{file_path}/{file_name} - Skipped")
-                break
+                continue
             else:
                 print(f"Invalid selection: {file_path}/{file_name} - Skipped")
-        print()
-        print(f"Download Starting: {file_path}/{file_name}. Please wait...")
-        download_status = jelllyfin_download(id,file_path,file_name,jellyfin_url,auth)
-        print(download_status)
+        else:
+            print()
+            print(f"Download Starting: {file_path}/{file_name}. Please wait...")
+            download_status = jelllyfin_download(id,file_path,file_name,jellyfin_url,auth)
+            print(download_status)
 
 elif type == "tv show":
-    selected_media = tv_season_selection(title,id,jellyfin_url,auth)
+    download_all = args.all
+    selected_media = tv_season_selection(title,id,jellyfin_url,auth,download_all)
     for season in selected_media:
         for item in season:
             series = item.get("series")
@@ -373,23 +438,36 @@ elif type == "tv show":
                 episode = f"0{episode}"
             id = item.get("id")
             file_type = item.get("file_type")
-            file_path = f"{root_destination}/{series}/Season {season}"
-            file_name = f"{series} S{season}E{episode}.{file_type}"
+            file_path = (f"{root_destination}/{series}/Season {season}").replace(':','')
+            file_name = (f"{series} S{season}E{episode}.{file_type}").replace(':','')
             full_path = f"{file_path}/{file_name}"
             if os.path.exists(full_path):
                 print(f"{file_path}/{file_name} - Already exists!")
-                overwrite = (input("Overwrite file? y/(n): ") or "n").lower()
-                if overwrite == "y" or overwrite == "yes":
-                    print()
-                elif overwrite == "n" or overwrite == "no":
+                if overwrite_media == True:
+                    overwrite = "y"
+                elif overwrite_media == False:
+                    overwrite = "n"
+                else:
+                    while True:
+                        overwrite = (input("Overwrite file? y/(n): ") or "n").lower()
+                        if overwrite == 'y' or overwrite == 'n':
+                            break
+                        else:
+                            print("Please type 'y' or 'n'")
+                if overwrite == "y":
+                    print("Overwriting")
+                    print(f"Download Starting: {file_path}/{file_name}. Please wait...")
+                    download_status = jelllyfin_download(id,file_path,file_name,jellyfin_url,auth)
+                    print(download_status)
+                elif overwrite == "n":
                     print(f"{file_path}/{file_name} - Skipped")
-                    break
+                    continue
                 else:
                     print(f"Invalid selection: {file_path}/{file_name} - Skipped")
-            print()
-            print(f"Download Starting: {file_path}/{file_name}. Please wait...")
-
-            download_status = jelllyfin_download(id,file_path,file_name,jellyfin_url,auth)
-            print(download_status)
+            else:
+                print()
+                print(f"Download Starting: {file_path}/{file_name}. Please wait...")
+                download_status = jelllyfin_download(id,file_path,file_name,jellyfin_url,auth)
+                print(download_status)
 print()
 print("Script Complete")
